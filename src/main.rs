@@ -13,7 +13,14 @@ use clap::Parser;
 
 use args::{Args, Mode};
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        print::print_error(&format!("{e:#}"));
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let args = Args::parse();
     let mut out = anstream::stdout().lock();
 
@@ -24,25 +31,26 @@ fn main() -> Result<()> {
     let config = config::load(args.config_loc.as_deref())?;
     writeln!(out, "done")?;
 
-    // Run old and new Oneil commands in parallel
-    writeln!(out, "running old and new Oneil ...")?;
+    // Run and parse old/new Oneil in parallel (each thread runs then parses)
+    write!(out, "running and parsing old and new Oneil ... ")?;
     out.flush()?;
-    let (old_output, new_output) = thread::scope(|s| {
-        let old_handle = s.spawn(|| run::run_old(&config.old_repo, &config.model_file));
-        let new_handle = s.spawn(|| run::run_new(&config.new_repo, &config.model_file));
-        anyhow::Ok((old_handle.join().unwrap()?, new_handle.join().unwrap()?))
-    })?;
-    writeln!(out, "done")?;
+    let (old_result, new_result) = thread::scope(|s| {
+        let old_handle = s.spawn(|| {
+            let output = run::run_old(&config.old_repo, &config.model_file)?;
+            let parsed = parse::parse_old_output(&output);
+            anyhow::Ok((parsed, output))
+        });
 
-    // Parse both outputs in parallel
-    writeln!(out, "parsing outputs ...")?;
-    out.flush()?;
-    let (old_parsed, new_parsed) = thread::scope(|s| {
-        let old_handle = s.spawn(|| parse::parse_old_output(&old_output));
-        let new_handle = s.spawn(|| parse::parse_new_output(&new_output));
+        let new_handle = s.spawn(|| {
+            let output = run::run_new(&config.new_repo, &config.model_file)?;
+            let parsed = parse::parse_new_output(&output);
+            anyhow::Ok((parsed, output))
+        });
+
         (old_handle.join().unwrap(), new_handle.join().unwrap())
     });
 
+    let (old_parsed, old_output) = old_result?;
     let (old_params, old_tests) = match old_parsed {
         Ok(result) => result,
         Err(e) => {
@@ -55,6 +63,7 @@ fn main() -> Result<()> {
         }
     };
 
+    let (new_parsed, new_output) = new_result?;
     let (new_params, new_tests) = match new_parsed {
         Ok(result) => result,
         Err(e) => {
@@ -69,7 +78,7 @@ fn main() -> Result<()> {
     writeln!(out, "done")?;
 
     // Diff params and tests in parallel
-    writeln!(out, "diffing ...")?;
+    write!(out, "diffing ... ")?;
     out.flush()?;
     let (mut diff_params, mut diff_tests) = thread::scope(|s| {
         let params_handle =
