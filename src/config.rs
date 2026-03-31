@@ -48,9 +48,35 @@ impl From<RawConfig> for Config {
 
 pub fn load(config_loc: Option<&str>) -> Result<Config> {
     let path = config_loc.unwrap_or(DEFAULT_CONFIG_LOC);
+
     let contents =
         std::fs::read_to_string(path).with_context(|| format!("failed to read config: {path}"))?;
+
     let raw: RawConfig =
         toml::from_str(&contents).with_context(|| format!("failed to parse config: {path}"))?;
-    Ok(raw.into())
+
+    let config = Config::from(raw);
+    validate(&config)?;
+
+    Ok(config)
+}
+
+fn validate(config: &Config) -> Result<()> {
+    anyhow::ensure!(
+        std::path::Path::new(&config.old_repo).is_dir(),
+        "old_repo directory does not exist: {:?}",
+        config.old_repo
+    );
+
+    anyhow::ensure!(
+        std::path::Path::new(&config.new_repo).is_dir(),
+        "new_repo directory does not exist: {:?}",
+        config.new_repo
+    );
+
+    anyhow::ensure!(
+        !config.model_file.trim().is_empty(),
+        "model_file must not be empty"
+    );
+    Ok(())
 }

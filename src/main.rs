@@ -8,7 +8,7 @@ mod run;
 use std::io::Write;
 use std::thread;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 
 use args::{Args, Mode};
@@ -50,31 +50,39 @@ fn run() -> Result<()> {
         (old_handle.join().unwrap(), new_handle.join().unwrap())
     });
 
-    let (old_parsed, old_output) = old_result?;
-    let (old_params, old_tests) = match old_parsed {
-        Ok(result) => result,
-        Err(e) => {
-            print::print_error(&format!("{e:#}"));
-            if args.print_source_on_parse_error {
-                writeln!(out, "source:")?;
-                writeln!(out, "{old_output}")?;
-            }
-            return Ok(());
-        }
-    };
+    let (old_parsed, old_output) = old_result.context("old Oneil run+parse thread failed")?;
+    let (new_parsed, new_output) = new_result.context("new Oneil run+parse thread failed")?;
 
-    let (new_parsed, new_output) = new_result?;
-    let (new_params, new_tests) = match new_parsed {
-        Ok(result) => result,
-        Err(e) => {
-            print::print_error(&format!("{e:#}"));
-            if args.print_source_on_parse_error {
-                writeln!(out, "source:")?;
-                writeln!(out, "{new_output}")?;
-            }
-            return Ok(());
+    let mut had_parse_error = false;
+
+    let old_parsed: Result<_, ()> = old_parsed.map_err(|e| {
+        had_parse_error = true;
+
+        if args.print_source_on_parse_error {
+            writeln!(out, "old output source:").ok();
+            writeln!(out, "{old_output}").ok();
         }
-    };
+
+        print::print_error(&format!("parsing old output: {e:#}"));
+    });
+
+    let new_parsed: Result<_, ()> = new_parsed.map_err(|e| {
+        had_parse_error = true;
+
+        if args.print_source_on_parse_error {
+            writeln!(out, "new output source:").ok();
+            writeln!(out, "{new_output}").ok();
+        }
+
+        print::print_error(&format!("parsing new output: {e:#}"));
+    });
+
+    if had_parse_error {
+        return Ok(());
+    }
+
+    let (old_params, old_tests) = old_parsed.unwrap();
+    let (new_params, new_tests) = new_parsed.unwrap();
     writeln!(out, "done")?;
 
     // Diff params and tests in parallel
