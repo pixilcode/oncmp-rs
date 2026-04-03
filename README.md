@@ -5,7 +5,7 @@ Compare parameters and regression tests between two versions of [Oneil](https://
 ## Requirements
 
 - [Rust](https://www.rust-lang.org/) (1.85+ for edition 2024)
-- Two model repo checkouts: one for the old CLI, one for the new
+- Two model repo checkouts: one for the old Oneil code, one for the new
 - A virtualenv (`.venv`) in each repo with `oneil` and/or other Python requirements installed
 
 ## Build & install
